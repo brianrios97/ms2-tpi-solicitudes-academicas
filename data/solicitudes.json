@@ -1,0 +1,83 @@
+{
+  "estudiantes": [
+    {
+      "legajo": "EST-101",
+      "nombre": "Carlos Perez",
+      "email": "carlos.perez@alumnos.edu.ar",
+      "carrera": "Tecnicatura Universitaria en Programacion"
+    },
+    {
+      "legajo": "EST-102",
+      "nombre": "Mariana Gomez",
+      "email": "mariana.gomez@alumnos.edu.ar",
+      "carrera": "Tecnicatura Universitaria en Programacion"
+    },
+    {
+      "legajo": "EST-103",
+      "nombre": "Lucas Fernandez",
+      "email": "lucas.f@alumnos.edu.ar",
+      "carrera": "Licenciatura en Sistemas"
+    }
+  ],
+  "responsables": [
+    {
+      "id": "RESP-01",
+      "nombre": "Prof. Martin Benitez",
+      "area": "Alumnos"
+    },
+    {
+      "id": "RESP-02",
+      "nombre": "Lic. Claudia Suarez",
+      "area": "Bedelia"
+    },
+    {
+      "id": "RESP-03",
+      "nombre": "Ing. Roberto Diaz",
+      "area": "Tesoreria"
+    }
+  ],
+  "solicitudes": [
+    {
+      "id": 1,
+      "estudiante_legajo": "EST-101",
+      "estudiante_nombre": "Carlos Perez",
+      "estudiante_email": "carlos.perez@alumnos.edu.ar",
+      "estudiante_carrera": "Tecnicatura Universitaria en Programacion",
+      "tipo": "Equivalencia de Materia",
+      "descripcion": "Solicitud de aprobacion por equivalencia de Algoritmos I de UTN.",
+      "fecha_creacion": "2026-10-15 10:30:00",
+      "prioridad": "ALTA",
+      "estado": "EN_CURSO",
+      "responsable_id": "RESP-01",
+      "observaciones": "En revision de documentacion analitica."
+    },
+    {
+      "id": 2,
+      "estudiante_legajo": "EST-102",
+      "estudiante_nombre": "Mariana Gomez",
+      "estudiante_email": "mariana.gomez@alumnos.edu.ar",
+      "estudiante_carrera": "Tecnicatura Universitaria en Programacion",
+      "tipo": "Certificado de Alumno Regular",
+      "descripcion": "Constancia para presentar en lugar de trabajo.",
+      "fecha_creacion": "2026-10-18 14:15:00",
+      "prioridad": "MEDIA",
+      "estado": "PENDIENTE",
+      "responsable_id": null,
+      "observaciones": ""
+    },
+    {
+      "id": 3,
+      "estudiante_legajo": "EST-103",
+      "estudiante_nombre": "Lucas Fernandez",
+      "estudiante_email": "lucas.f@alumnos.edu.ar",
+      "estudiante_carrera": "Licenciatura en Sistemas",
+      "tipo": "Reclamo de Examen",
+      "descripcion": "Reclamo por nota mal cargada en acta de Final de Base de Datos.",
+      "fecha_creacion": "2026-10-10 09:00:00",
+      "prioridad": "ALTA",
+      "estado": "RESUELTA",
+      "responsable_id": "RESP-02",
+      "observaciones": "Nota corregida en SIU Guarani."
+    }
+  ]
+}
