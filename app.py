@@ -14,7 +14,22 @@ diagnostico y refactorizacion profesional (calidad interna).
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime
+
+
+@dataclass(frozen=True)
+class DatosRegistroSolicitud:
+    """Parameter Object: agrupa los datos necesarios para registrar una solicitud."""
+    legajo: str
+    nombre: str
+    email: str
+    carrera: str
+    tipo: str
+    prioridad: str
+    descripcion: str
+    observaciones: str = ""
+
 
 class SistemaGestionAcademica:
     """
@@ -57,32 +72,50 @@ class SistemaGestionAcademica:
             print(f"Error al guardar archivo: {e}")
             return False
 
-    # SMELL 2: LONG METHOD & SMELL 3: LONG PARAMETER LIST / PRIMITIVE OBSESSION
-    def registrar_solicitud(self, legajo, nombre, email, carrera, tipo, prioridad, descripcion, observaciones=""):
-        """
-        Recibe 8 parametros primitivos en vez de objetos de dominio o Parameter Object.
-        Contiene multiples responsabilidades en un solo metodo:
-        - Validacion de datos
-        - Reglas de negocio segun tipo/prioridad (SMELL 5: cadenas if-elif)
-        - Generacion de ID correlativo
-        - Insercion en estructura interna
-        - Guardado en disco
-        """
-        # Validaciones basicas
-        if not legajo or not nombre or not email:
-            print("Error: Los datos del estudiante son obligatorios.")
+    def registrar_solicitud(self, datos):
+        """Devuelve el ID asignado, o -1 si los datos no son validos."""
+        if not self._datos_son_validos(datos):
             return -1
 
+        prioridad_final = self._calcular_prioridad(datos.tipo, datos.prioridad)
+
+        self._registrar_estudiante_si_no_existe(datos)
+
+        nuevo_id = self._generar_nuevo_id()
+        self.datos["solicitudes"].append(
+            self._construir_solicitud(nuevo_id, datos, prioridad_final)
+        )
+        self.guardar_datos()
+        return nuevo_id
+
+    def _datos_son_validos(self, datos):
+        return (
+            self._validar_datos_estudiante(datos)
+            and self._validar_email(datos.email)
+            and self._validar_descripcion(datos.descripcion)
+        )
+
+    def _validar_datos_estudiante(self, datos):
+        if not datos.legajo or not datos.nombre or not datos.email:
+            print("Error: Los datos del estudiante son obligatorios.")
+            return False
+        return True
+
+    def _validar_email(self, email):
         if "@" not in email or "." not in email:
             print("Error: El correo electronico del estudiante no es valido.")
-            return -1
+            return False
+        return True
 
+    def _validar_descripcion(self, descripcion):
         if not descripcion or len(descripcion.strip()) < 10:
             print("Error: La descripcion debe tener al menos 10 caracteres explicativos.")
-            return -1
+            return False
+        return True
 
-        # SMELL 5: CONDITIONAL CHAINS / SWITCH STATEMENTS
-        # Logica condicional para validar o forzar prioridad segun tipo de tramite
+    # SMELL 5: CONDITIONAL CHAINS / SWITCH STATEMENTS
+    # Logica condicional para validar o forzar prioridad segun tipo de tramite
+    def _calcular_prioridad(self, tipo, prioridad):
         prioridad_final = prioridad.upper().strip() if prioridad else "MEDIA"
         if tipo == "Equivalencia de Materia":
             if prioridad_final != "ALTA" and prioridad_final != "MEDIA" and prioridad_final != "BAJA":
@@ -95,51 +128,39 @@ class SistemaGestionAcademica:
             prioridad_final = "BAJA"
         else:
             print(f"Advertencia: Tipo de tramite desconocido '{tipo}'.")
+        return prioridad_final
 
-        # SMELL 4: FEATURE ENVY / INAPPROPRIATE INTIMACY
-        # Manipula directamente diccionarios primitivos sin modelos encapsulados
-        estudiante_existente = None
-        for est in self.datos["estudiantes"]:
-            if est["legajo"] == legajo:
-                estudiante_existente = est
-                break
+    def _registrar_estudiante_si_no_existe(self, datos):
+        existe = any(est["legajo"] == datos.legajo for est in self.datos["estudiantes"])
+        if not existe:
+            self.datos["estudiantes"].append({
+                "legajo": datos.legajo,
+                "nombre": datos.nombre,
+                "email": datos.email,
+                "carrera": datos.carrera
+            })
 
-        if not estudiante_existente:
-            nuevo_est = {
-                "legajo": legajo,
-                "nombre": nombre,
-                "email": email,
-                "carrera": carrera
-            }
-            self.datos["estudiantes"].append(nuevo_est)
+    def _generar_nuevo_id(self):
+        if not self.datos["solicitudes"]:
+            return 1
+        return max(s["id"] for s in self.datos["solicitudes"]) + 1
 
-        # Generar proximo ID numerico
-        nuevo_id = 1
-        if self.datos["solicitudes"]:
-            nuevo_id = max(s["id"] for s in self.datos["solicitudes"]) + 1
-
-        # Formato de fecha
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        nueva_solicitud = {
+    def _construir_solicitud(self, nuevo_id, datos, prioridad_final):
+        return {
             "id": nuevo_id,
-            "estudiante_legajo": legajo,
-            "estudiante_nombre": nombre,
-            "estudiante_email": email,
-            "estudiante_carrera": carrera,
-            "tipo": tipo,
-            "descripcion": descripcion,
-            "fecha_creacion": fecha_actual,
+            "estudiante_legajo": datos.legajo,
+            "estudiante_nombre": datos.nombre,
+            "estudiante_email": datos.email,
+            "estudiante_carrera": datos.carrera,
+            "tipo": datos.tipo,
+            "descripcion": datos.descripcion,
+            "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "prioridad": prioridad_final,
             # SMELL 6: MAGIC STRING
             "estado": "PENDIENTE",
             "responsable_id": None,
-            "observaciones": observaciones
+            "observaciones": datos.observaciones
         }
-
-        self.datos["solicitudes"].append(nueva_solicitud)
-        self.guardar_datos()
-        return nuevo_id
 
     # OPERACION 2: ASIGNAR RESPONSABLE
     def asignar_responsable(self, id_solicitud, id_responsable):
@@ -280,7 +301,11 @@ def ejecutar_cli():
             descripcion = input("Descripcion del motivo (min 10 caracteres): ").strip()
             obs = input("Observaciones adicionales (opcional): ").strip()
 
-            nuevo_id = sistema.registrar_solicitud(legajo, nombre, email, carrera, tipo, prioridad, descripcion, obs)
+            datos = DatosRegistroSolicitud(
+                legajo=legajo, nombre=nombre, email=email, carrera=carrera,
+                tipo=tipo, prioridad=prioridad, descripcion=descripcion, observaciones=obs
+            )
+            nuevo_id = sistema.registrar_solicitud(datos)
             if nuevo_id > 0:
                 print(f"\n>> Solicitud #{nuevo_id} registrada con exito en estado PENDIENTE.")
             else:
