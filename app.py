@@ -16,11 +16,20 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from dominio import (
+    PRIORIDAD_SI_NO_SE_INFORMA,
+    EstadoSolicitud,
+    Prioridad,
+    Solicitud,
+    TipoTramite,
+    TransicionInvalidaError,
+)
 
 
 @dataclass(frozen=True)
 class DatosRegistroSolicitud:
     """Parameter Object: agrupa los datos necesarios para registrar una solicitud."""
+
     legajo: str
     nombre: str
     email: str
@@ -109,36 +118,36 @@ class SistemaGestionAcademica:
 
     def _validar_descripcion(self, descripcion):
         if not descripcion or len(descripcion.strip()) < 10:
-            print("Error: La descripcion debe tener al menos 10 caracteres explicativos.")
+            print(
+                "Error: La descripcion debe tener al menos 10 caracteres explicativos."
+            )
             return False
         return True
 
-    # SMELL 5: CONDITIONAL CHAINS / SWITCH STATEMENTS
-    # Logica condicional para validar o forzar prioridad segun tipo de tramite
     def _calcular_prioridad(self, tipo, prioridad):
-        prioridad_final = prioridad.upper().strip() if prioridad else "MEDIA"
-        if tipo == "Equivalencia de Materia":
-            if prioridad_final != "ALTA" and prioridad_final != "MEDIA" and prioridad_final != "BAJA":
-                prioridad_final = "ALTA"
-        elif tipo == "Certificado de Alumno Regular":
-            prioridad_final = "MEDIA"
-        elif tipo == "Reclamo de Examen":
-            prioridad_final = "ALTA"
-        elif tipo == "Pase de Carrera":
-            prioridad_final = "BAJA"
-        else:
+        """La regla de prioridad por tipo está en TipoTramite (Refactoring N°4)"""
+        prioridad_ingresada = (
+            prioridad.upper().strip() if prioridad else PRIORIDAD_SI_NO_SE_INFORMA.value
+        )
+        tipo_tramite = TipoTramite.desde_texto(tipo)
+        if tipo_tramite is None:
             print(f"Advertencia: Tipo de tramite desconocido '{tipo}'.")
-        return prioridad_final
+            return prioridad_ingresada
+        return tipo_tramite.resolver_prioridad(
+            Prioridad.desde_texto(prioridad_ingresada)
+        ).value
 
     def _registrar_estudiante_si_no_existe(self, datos):
         existe = any(est["legajo"] == datos.legajo for est in self.datos["estudiantes"])
         if not existe:
-            self.datos["estudiantes"].append({
-                "legajo": datos.legajo,
-                "nombre": datos.nombre,
-                "email": datos.email,
-                "carrera": datos.carrera
-            })
+            self.datos["estudiantes"].append(
+                {
+                    "legajo": datos.legajo,
+                    "nombre": datos.nombre,
+                    "email": datos.email,
+                    "carrera": datos.carrera,
+                }
+            )
 
     def _generar_nuevo_id(self):
         if not self.datos["solicitudes"]:
@@ -157,70 +166,68 @@ class SistemaGestionAcademica:
             "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "prioridad": prioridad_final,
             # SMELL 6: MAGIC STRING
-            "estado": "PENDIENTE",
+            "estado": EstadoSolicitud.PENDIENTE.value,
             "responsable_id": None,
-            "observaciones": datos.observaciones
+            "observaciones": datos.observaciones,
         }
 
     # OPERACION 2: ASIGNAR RESPONSABLE
     def asignar_responsable(self, id_solicitud, id_responsable):
-        solicitud = self.obtener_solicitud_por_id(id_solicitud)
-        if not solicitud:
+        registro = self.obtener_solicitud_por_id(id_solicitud)
+        if not registro:
             print(f"Error: No existe solicitud con ID {id_solicitud}.")
             return False
 
-        responsable = self.obtener_responsable_por_id(id_responsable)
-        if not responsable:
+        if not self.obtener_responsable_por_id(id_responsable):
             print(f"Error: No existe responsable con ID {id_responsable}.")
             return False
 
-        solicitud["responsable_id"] = id_responsable
-        # Si estaba pendiente, al asignar pasa a 'EN_CURSO'
-        if solicitud["estado"] == "PENDIENTE":
-            solicitud["estado"] = "EN_CURSO"
-
-        self.guardar_datos()
-        return True
+        solicitud = Solicitud.desde_dict(registro)
+        solicitud.asignar_responsable(id_responsable)
+        return self._guardar_solicitud(registro, solicitud)
 
     # OPERACION 3: CAMBIAR ESTADO
     def cambiar_estado(self, id_solicitud, nuevo_estado, obs=""):
-        solicitud = self.obtener_solicitud_por_id(id_solicitud)
-        if not solicitud:
+        registro = self.obtener_solicitud_por_id(id_solicitud)
+        if not registro:
             print(f"Error: Solicitud {id_solicitud} no encontrada.")
             return False
 
-        # SMELL 6: MAGIC STRINGS
-        estados_validos = ["PENDIENTE", "EN_CURSO", "RESUELTA", "RECHAZADA"]
-        nuevo_estado_upper = nuevo_estado.upper().strip()
-
-        if nuevo_estado_upper not in estados_validos:
-            print(f"Error: Estado invalido '{nuevo_estado}'. Debe ser uno de {estados_validos}")
+        estado_destino = EstadoSolicitud.desde_texto(nuevo_estado)
+        if estado_destino is None:
+            print(
+                f"Error: Estado invalido '{nuevo_estado}'. Debe ser uno de {EstadoSolicitud.valores()}"
+            )
             return False
 
-        # Validaciones de transicion
-        if solicitud["estado"] == "RESUELTA" or solicitud["estado"] == "RECHAZADA":
-            print(f"Error: La solicitud {id_solicitud} ya esta finalizada ({solicitud['estado']}).")
+        solicitud = Solicitud.desde_dict(registro)
+        try:
+            solicitud.cambiar_estado(estado_destino, obs)
+        except TransicionInvalidaError as error:
+            print(f"Error: {error}")
             return False
 
-        if nuevo_estado_upper == "RESUELTA" and not solicitud["responsable_id"]:
-            print("Error: No se puede resolver una solicitud sin un responsable asignado.")
-            return False
+        return self._guardar_solicitud(registro, solicitud)
 
-        solicitud["estado"] = nuevo_estado_upper
-        if obs:
-            solicitud["observaciones"] = (solicitud.get("observaciones", "") + " | " + obs).strip(" | ")
-
+    def _guardar_solicitud(self, registro, solicitud):
+        """Vuelca el estado de la entidad al registro persistido y guarda en disco."""
+        registro.update(solicitud.a_dict())
         self.guardar_datos()
         return True
 
     # OPERACION 4: BUSCAR Y FILTRAR
-    def buscar_solicitudes(self, filtro_estado=None, filtro_legajo=None, filtro_responsable=None):
+    def buscar_solicitudes(
+        self, filtro_estado=None, filtro_legajo=None, filtro_responsable=None
+    ):
         resultados = []
         for sol in self.datos["solicitudes"]:
             coincide = True
             if filtro_estado and sol["estado"].upper() != filtro_estado.upper():
                 coincide = False
-            if filtro_legajo and sol["estudiante_legajo"].upper() != filtro_legajo.upper():
+            if (
+                filtro_legajo
+                and sol["estudiante_legajo"].upper() != filtro_legajo.upper()
+            ):
                 coincide = False
             if filtro_responsable and sol["responsable_id"] != filtro_responsable:
                 coincide = False
@@ -233,18 +240,23 @@ class SistemaGestionAcademica:
     def generar_reporte_general(self):
         """Calcula metricas agregadas y muestra resumen estadistico."""
         total = len(self.datos["solicitudes"])
-        pendientes = sum(1 for s in self.datos["solicitudes"] if s["estado"] == "PENDIENTE")
-        en_curso = sum(1 for s in self.datos["solicitudes"] if s["estado"] == "EN_CURSO")
-        resueltas = sum(1 for s in self.datos["solicitudes"] if s["estado"] == "RESUELTA")
-        rechazadas = sum(1 for s in self.datos["solicitudes"] if s["estado"] == "RECHAZADA")
+        cantidad = {
+            estado: sum(
+                1 for s in self.datos["solicitudes"] if s["estado"] == estado.value
+            )
+            for estado in EstadoSolicitud
+        }
+        resueltas = cantidad[EstadoSolicitud.RESUELTA]
 
         reporte = {
             "total_solicitudes": total,
-            "pendientes": pendientes,
-            "en_curso": en_curso,
+            "pendientes": cantidad[EstadoSolicitud.PENDIENTE],
+            "en_curso": cantidad[EstadoSolicitud.EN_CURSO],
             "resueltas": resueltas,
-            "rechazadas": rechazadas,
-            "tasa_resolucion": round((resueltas / total * 100), 2) if total > 0 else 0.0
+            "rechazadas": cantidad[EstadoSolicitud.RECHAZADA],
+            "tasa_resolucion": round((resueltas / total * 100), 2)
+            if total > 0
+            else 0.0,
         }
         return reporte
 
@@ -282,6 +294,7 @@ def mostrar_menu():
     print("0. Salir")
     print("=" * 60)
 
+
 def ejecutar_cli():
     sistema = SistemaGestionAcademica()
 
@@ -295,21 +308,31 @@ def ejecutar_cli():
             nombre = input("Nombre completo: ").strip()
             email = input("Email: ").strip()
             carrera = input("Carrera: ").strip()
-            print("Tipos sugeridos: Equivalencia de Materia, Certificado de Alumno Regular, Reclamo de Examen, Pase de Carrera")
+            print(f"Tipos sugeridos: {', '.join(TipoTramite.valores())}")
             tipo = input("Tipo de tramite: ").strip()
-            prioridad = input("Prioridad (ALTA, MEDIA, BAJA): ").strip()
+            prioridad = input(f"Prioridad ({', '.join(Prioridad.valores())}): ").strip()
             descripcion = input("Descripcion del motivo (min 10 caracteres): ").strip()
             obs = input("Observaciones adicionales (opcional): ").strip()
 
             datos = DatosRegistroSolicitud(
-                legajo=legajo, nombre=nombre, email=email, carrera=carrera,
-                tipo=tipo, prioridad=prioridad, descripcion=descripcion, observaciones=obs
+                legajo=legajo,
+                nombre=nombre,
+                email=email,
+                carrera=carrera,
+                tipo=tipo,
+                prioridad=prioridad,
+                descripcion=descripcion,
+                observaciones=obs,
             )
             nuevo_id = sistema.registrar_solicitud(datos)
             if nuevo_id > 0:
-                print(f"\n>> Solicitud #{nuevo_id} registrada con exito en estado PENDIENTE.")
+                print(
+                    f"\n>> Solicitud #{nuevo_id} registrada con exito en estado {EstadoSolicitud.PENDIENTE.value}."
+                )
             else:
-                print("\n>> No se pudo registrar la solicitud debido a errores de validacion.")
+                print(
+                    "\n>> No se pudo registrar la solicitud debido a errores de validacion."
+                )
 
         elif opcion == "2":
             print("\n--- LISTADO GENERAL DE SOLICITUDES ---")
@@ -318,8 +341,12 @@ def ejecutar_cli():
                 print("No hay solicitudes registradas.")
             else:
                 for s in solicitudes:
-                    print(f"[{s['id']}] {s['fecha_creacion']} | {s['tipo']} | Est: {s['estudiante_nombre']} ({s['estudiante_legajo']})")
-                    print(f"     Estado: {s['estado']} | Prioridad: {s['prioridad']} | Resp: {s['responsable_id'] or 'Sin asignar'}")
+                    print(
+                        f"[{s['id']}] {s['fecha_creacion']} | {s['tipo']} | Est: {s['estudiante_nombre']} ({s['estudiante_legajo']})"
+                    )
+                    print(
+                        f"     Estado: {s['estado']} | Prioridad: {s['prioridad']} | Resp: {s['responsable_id'] or 'Sin asignar'}"
+                    )
                     print(f"     Desc: {s['descripcion']}")
                     if s.get("observaciones"):
                         print(f"     Obs: {s['observaciones']}")
@@ -342,21 +369,34 @@ def ejecutar_cli():
             print("\n--- CAMBIAR ESTADO ---")
             try:
                 id_sol = int(input("Ingrese ID de la solicitud: "))
-                nuevo_estado = input("Nuevo estado (PENDIENTE, EN_CURSO, RESUELTA, RECHAZADA): ").strip()
+                nuevo_estado = input(
+                    f"Nuevo estado ({', '.join(EstadoSolicitud.valores())}): "
+                ).strip()
                 obs = input("Motivo o resolucion: ").strip()
                 if sistema.cambiar_estado(id_sol, nuevo_estado, obs):
-                    print(f">> Estado de solicitud #{id_sol} actualizado a {nuevo_estado.upper()}.")
+                    print(
+                        f">> Estado de solicitud #{id_sol} actualizado a {nuevo_estado.upper()}."
+                    )
             except ValueError:
                 print("Error: El ID debe ser un numero entero.")
 
         elif opcion == "5":
             print("\n--- FILTRAR SOLICITUDES ---")
-            filtro_est = input("Filtrar por estado (Enter para omitir): ").strip() or None
-            filtro_leg = input("Filtrar por legajo estudiante (Enter para omitir): ").strip() or None
-            resultados = sistema.buscar_solicitudes(filtro_estado=filtro_est, filtro_legajo=filtro_leg)
+            filtro_est = (
+                input("Filtrar por estado (Enter para omitir): ").strip() or None
+            )
+            filtro_leg = (
+                input("Filtrar por legajo estudiante (Enter para omitir): ").strip()
+                or None
+            )
+            resultados = sistema.buscar_solicitudes(
+                filtro_estado=filtro_est, filtro_legajo=filtro_leg
+            )
             print(f"\nResultados encontrados: {len(resultados)}")
             for s in resultados:
-                print(f"[{s['id']}] {s['tipo']} | {s['estado']} | {s['estudiante_nombre']} | Resp: {s['responsable_id'] or 'N/A'}")
+                print(
+                    f"[{s['id']}] {s['tipo']} | {s['estado']} | {s['estudiante_nombre']} | Resp: {s['responsable_id'] or 'N/A'}"
+                )
 
         elif opcion == "6":
             print("\n--- REPORTE DE GESTION Y METRICAS ---")
@@ -378,6 +418,7 @@ def ejecutar_cli():
             break
         else:
             print("Opcion invalida. Intente nuevamente.")
+
 
 if __name__ == "__main__":
     ejecutar_cli()
