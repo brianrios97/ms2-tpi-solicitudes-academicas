@@ -10,8 +10,29 @@ import unittest
 from dominio import (
     EstadoSolicitud,
     Prioridad,
+    Solicitud,
     TipoTramite,
+    TransicionInvalidaError,
 )
+
+
+def nueva_solicitud(**cambios):
+    datos = {
+        "id": 7,
+        "estudiante_legajo": "EST-200",
+        "estudiante_nombre": "Ana Perez",
+        "estudiante_email": "ana@alumnos.edu.ar",
+        "estudiante_carrera": "Tecnicatura en Programacion",
+        "tipo": "Reclamo de Examen",
+        "descripcion": "Reclamo por nota del parcial.",
+        "fecha_creacion": "2026-10-20 10:00:00",
+        "prioridad": "ALTA",
+        "estado": "PENDIENTE",
+        "responsable_id": None,
+        "observaciones": "",
+    }
+    datos.update(cambios)
+    return Solicitud.desde_dict(datos)
 
 
 class EnumsTest(unittest.TestCase):
@@ -65,6 +86,57 @@ class ResolverPrioridadTest(unittest.TestCase):
 
     def test_equivalencia_sin_prioridad_valida_usa_alta(self):
         self.assertIs(TipoTramite.EQUIVALENCIA.resolver_prioridad(None), Prioridad.ALTA)
+
+
+class SolicitudTest(unittest.TestCase):
+    def test_ida_y_vuelta_dict_conserva_formato_persistido(self):
+        original = nueva_solicitud(observaciones="algo").a_dict()
+        self.assertEqual(Solicitud.desde_dict(original).a_dict(), original)
+        self.assertEqual(original["estado"], "PENDIENTE")
+        self.assertIsInstance(original["estado"], str)
+
+    def test_asignar_responsable_pasa_pendiente_a_en_curso(self):
+        sol = nueva_solicitud()
+        sol.asignar_responsable("RESP-01")
+        self.assertEqual(sol.responsable_id, "RESP-01")
+        self.assertIs(sol.estado, EstadoSolicitud.EN_CURSO)
+
+    def test_asignar_responsable_no_cambia_otros_estados(self):
+        sol = nueva_solicitud(estado="RESUELTA", responsable_id="RESP-01")
+        sol.asignar_responsable("RESP-02")
+        self.assertEqual(sol.responsable_id, "RESP-02")
+        self.assertIs(sol.estado, EstadoSolicitud.RESUELTA)
+
+    def test_no_se_puede_resolver_sin_responsable(self):
+        sol = nueva_solicitud()
+        with self.assertRaisesRegex(TransicionInvalidaError, "sin un responsable"):
+            sol.cambiar_estado(EstadoSolicitud.RESUELTA)
+        self.assertIs(sol.estado, EstadoSolicitud.PENDIENTE)
+
+    def test_se_puede_rechazar_sin_responsable(self):
+        sol = nueva_solicitud()
+        sol.cambiar_estado(EstadoSolicitud.RECHAZADA, "Fuera de termino")
+        self.assertIs(sol.estado, EstadoSolicitud.RECHAZADA)
+        self.assertEqual(sol.observaciones, "Fuera de termino")
+
+    def test_solicitud_finalizada_no_admite_cambios(self):
+        for final in ("RESUELTA", "RECHAZADA"):
+            with self.subTest(final=final):
+                sol = nueva_solicitud(estado=final, responsable_id="RESP-01")
+                with self.assertRaisesRegex(
+                    TransicionInvalidaError, f"ya esta finalizada \\({final}\\)"
+                ):
+                    sol.cambiar_estado(EstadoSolicitud.EN_CURSO)
+
+    def test_observaciones_se_concatenan_con_separador(self):
+        sol = nueva_solicitud(observaciones="Primera", responsable_id="RESP-01")
+        sol.cambiar_estado(EstadoSolicitud.RESUELTA, "Aprobada")
+        self.assertEqual(sol.observaciones, "Primera | Aprobada")
+
+    def test_observacion_vacia_no_modifica(self):
+        sol = nueva_solicitud(observaciones="Primera")
+        sol.cambiar_estado(EstadoSolicitud.EN_CURSO, "")
+        self.assertEqual(sol.observaciones, "Primera")
 
 
 if __name__ == "__main__":

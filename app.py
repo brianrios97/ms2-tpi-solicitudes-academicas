@@ -20,7 +20,9 @@ from dominio import (
     PRIORIDAD_SI_NO_SE_INFORMA,
     EstadoSolicitud,
     Prioridad,
+    Solicitud,
     TipoTramite,
+    TransicionInvalidaError,
 )
 
 
@@ -171,28 +173,23 @@ class SistemaGestionAcademica:
 
     # OPERACION 2: ASIGNAR RESPONSABLE
     def asignar_responsable(self, id_solicitud, id_responsable):
-        solicitud = self.obtener_solicitud_por_id(id_solicitud)
-        if not solicitud:
+        registro = self.obtener_solicitud_por_id(id_solicitud)
+        if not registro:
             print(f"Error: No existe solicitud con ID {id_solicitud}.")
             return False
 
-        responsable = self.obtener_responsable_por_id(id_responsable)
-        if not responsable:
+        if not self.obtener_responsable_por_id(id_responsable):
             print(f"Error: No existe responsable con ID {id_responsable}.")
             return False
 
-        solicitud["responsable_id"] = id_responsable
-        # Si estaba pendiente, al asignar pasa a 'EN_CURSO'
-        if solicitud["estado"] == EstadoSolicitud.PENDIENTE.value:
-            solicitud["estado"] = EstadoSolicitud.EN_CURSO.value
-
-        self.guardar_datos()
-        return True
+        solicitud = Solicitud.desde_dict(registro)
+        solicitud.asignar_responsable(id_responsable)
+        return self._guardar_solicitud(registro, solicitud)
 
     # OPERACION 3: CAMBIAR ESTADO
     def cambiar_estado(self, id_solicitud, nuevo_estado, obs=""):
-        solicitud = self.obtener_solicitud_por_id(id_solicitud)
-        if not solicitud:
+        registro = self.obtener_solicitud_por_id(id_solicitud)
+        if not registro:
             print(f"Error: Solicitud {id_solicitud} no encontrada.")
             return False
 
@@ -203,28 +200,18 @@ class SistemaGestionAcademica:
             )
             return False
 
-        # Validaciones de transicion
-        if EstadoSolicitud(solicitud["estado"]).es_final:
-            print(
-                f"Error: La solicitud {id_solicitud} ya esta finalizada ({solicitud['estado']})."
-            )
+        solicitud = Solicitud.desde_dict(registro)
+        try:
+            solicitud.cambiar_estado(estado_destino, obs)
+        except TransicionInvalidaError as error:
+            print(f"Error: {error}")
             return False
 
-        if (
-            estado_destino == EstadoSolicitud.RESUELTA
-            and not solicitud["responsable_id"]
-        ):
-            print(
-                "Error: No se puede resolver una solicitud sin un responsable asignado."
-            )
-            return False
+        return self._guardar_solicitud(registro, solicitud)
 
-        solicitud["estado"] = estado_destino.value
-        if obs:
-            solicitud["observaciones"] = (
-                solicitud.get("observaciones", "") + " | " + obs
-            ).strip(" | ")
-
+    def _guardar_solicitud(self, registro, solicitud):
+        """Vuelca el estado de la entidad al registro persistido y guarda en disco."""
+        registro.update(solicitud.a_dict())
         self.guardar_datos()
         return True
 
