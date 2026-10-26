@@ -3,7 +3,7 @@ Script de verificacion automatizada del estado inicial del sistema.
 Ejecuta las operaciones principales y demuestra que el sistema funciona
 externamente (Calidad Externa OK) antes de aplicar cualquier refactor.
 """
-from app import SistemaGestionAcademica
+from app import SistemaGestionAcademica, DatosRegistroSolicitud
 
 def main():
     print("=== VERIFICACION DE ESTADO INICIAL ===")
@@ -16,7 +16,7 @@ def main():
 
     # 2. Registrar nueva solicitud
     print("\n--- TEST: Registrar Solicitud ---")
-    nuevo_id = sistema.registrar_solicitud(
+    nuevo_id = sistema.registrar_solicitud(DatosRegistroSolicitud(
         legajo="EST-104",
         nombre="Sofia Martinez",
         email="sofia.m@alumnos.edu.ar",
@@ -25,7 +25,7 @@ def main():
         prioridad="BAJA",
         descripcion="Solicitud de cambio de comision por razones laborales.",
         observaciones="Adjunta recibo de sueldo"
-    )
+    ))
     print(f"Solicitud creada con ID: {nuevo_id}")
     assert nuevo_id > 0, "Fallo al registrar solicitud"
 
